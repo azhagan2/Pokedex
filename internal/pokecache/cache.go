@@ -64,7 +64,6 @@ func (c *Cache) reapLoop(interval time.Duration) {
 			for _, k := range keysToDelete {
 				delete(c.items, k)
 			}
-
 			c.mu.Unlock()
 		}
 	}()
