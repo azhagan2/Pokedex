@@ -17,8 +17,26 @@ import (
 var baseURL = "https://pokeapi.co/api/v2/location-area"
 var pokemonURL = "https://pokeapi.co/api/v2/pokemon"
 
-type BaseEncounter struct {
-	BaseExperience int `json:"base_experience"`
+type Pokemon_details struct {
+	Name           string `json:"name"`
+	BaseExperience int    `json:"base_experience"`
+	Height         int    `json:"height"`
+	Weight         int    `json:"weight"`
+	Stats          []struct {
+		BaseStat int `json:"base_stat"`
+		Effort   int `json:"effort"`
+		Stat     struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"stat"`
+	} `json:"stats"`
+	Types []struct {
+		Slot int `json:"slot"`
+		Type struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"type"`
+	} `json:"types"`
 }
 
 type PokemonEncountersResponse struct {
@@ -39,6 +57,17 @@ type config struct {
 	Next string
 	Prev string
 }
+
+type game struct {
+	pokedex map[string]Pokemon
+}
+
+type Pokemon struct {
+	Name           string
+	BaseExperience int
+	Inspection     Pokemon_details
+}
+
 type LocationAreaResponse struct {
 	Count    int            `json:"count"`
 	Next     *string        `json:"next"`     // Pointer because it could be null
@@ -49,6 +78,10 @@ type LocationAreaResponse struct {
 type LocationArea struct {
 	Name string `json:"name"`
 	URL  string `json:"url"`
+}
+
+var g = &game{
+	pokedex: make(map[string]Pokemon),
 }
 
 func main() {
@@ -83,6 +116,18 @@ func main() {
 			name:        "explore {location-area}",
 			description: "Displays the list of Pokemon located in a location area",
 		},
+		"catch": {
+			name:        "catch {pokemon}",
+			description: "catches the pokemon into the pokedex, user is giving",
+		},
+		"inspect": {
+			name:        "inspect {pokemon}",
+			description: "inspects the caught pokemon",
+		},
+		"pokedex": {
+			name:        "pokedex",
+			description: "shows all the pokemon caught",
+		},
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -101,6 +146,10 @@ func main() {
 			Explore(input[1], cache)
 		} else if len(input) > 1 && strings.ToLower(input[0]) == "catch" {
 			Catch(input[1], cache)
+		} else if len(input) > 1 && strings.ToLower(input[0]) == "inspect" {
+			g.inspect(input[1])
+		} else if strings.ToLower(input[0]) == "pokedex" {
+			g.commandPokedex()
 		} else {
 			cmd, ok := command[input[0]]
 			if ok {
@@ -264,7 +313,7 @@ func commandHelp(commands map[string]cliCommand) error {
 	fmt.Println("Usage:")
 	fmt.Println()
 
-	orderedCmds := []string{"explore", "help", "map", "mapb", "exit"}
+	orderedCmds := []string{"catch", "explore", "help", "inspect", "map", "mapb", "pokdex", "exit"}
 
 	for _, cmd := range orderedCmds {
 		if cmd, ok := commands[cmd]; ok {
@@ -277,7 +326,7 @@ func commandHelp(commands map[string]cliCommand) error {
 
 func Explore(a string, cache *pokecache.Cache) error {
 	// fmt.Println("Fuck. I can't provide") // Just checking ah
-	poke_name_url := pokemonURL + "/" + a
+	poke_name_url := baseURL + "/" + a
 	// fmt.Println(poke_url)
 
 	if cachedData, found := cache.Get(poke_name_url); found {
@@ -318,7 +367,7 @@ func Catch(a string, cache *pokecache.Cache) error {
 
 	if cachedData, found := cache.Get(poke_url); found {
 		fmt.Println("Cache hit! Using cached data...")
-		return get_base_encounter(cachedData)
+		return g.get_base_encounter(cachedData, a)
 	}
 	fmt.Println(poke_url)
 	fmt.Println("Cache miss! Catching from API...")
@@ -345,10 +394,12 @@ func Catch(a string, cache *pokecache.Cache) error {
 	cache.Add(poke_url, body)
 
 	// Step 6: Process the data using the helper
-	return get_base_encounter(body)
+	return g.get_base_encounter(body, a)
 }
 
 func get_pokemon_name_from_location_area(data []byte) error {
+
+	fmt.Println("Inside the get_pokemon_name_frm_location_area")
 	response := PokemonEncountersResponse{}
 	err := json.Unmarshal(data, &response)
 	if err != nil {
@@ -361,29 +412,82 @@ func get_pokemon_name_from_location_area(data []byte) error {
 	return nil
 }
 
-func get_base_encounter(data []byte) error {
-	response := BaseEncounter{}
+func (g *game) get_base_encounter(data []byte, a string) error {
+	response := Pokemon_details{}
 	err := json.Unmarshal(data, &response)
 	if err != nil {
 		return err
 	}
 
-	fmt.Println(response.BaseExperience)
+	// fmt.Println(response.BaseExperience)
 
 	rand.Seed(time.Now().UnixNano())
 
-	n := response.BaseExperience
+	n := max(response.BaseExperience/20, 1)
 	success := rand.Intn(n) == 0
 
-	fmt.Println("Throwing a Pokeball at pikachu...")
+	fmt.Printf("Throwing a Pokeball at %v...\n", a)
 
 	if success {
-		fmt.Println("pikachu was caught!")
+		fmt.Printf("%v was caught!\n", a)
+
+		g.pokedex[a] = Pokemon{
+			Name:           a,
+			BaseExperience: response.BaseExperience,
+			Inspection: Pokemon_details{
+				Height: response.Height,
+				Weight: response.Weight,
+				Stats:  response.Stats,
+				Types:  response.Types,
+			},
+		}
+
 	} else {
-		fmt.Println("Pikachu escaped!")
+		fmt.Printf("%v escaped!\n", a)
+	}
+
+	fmt.Println("Pokedex now contains:", len(g.pokedex), "Pokemon")
+	for name := range g.pokedex {
+		fmt.Println("- " + name)
 	}
 
 	return nil
+}
+
+func (g *game) inspect(a string) {
+
+	fmt.Println("Looking for Pokémon:", a)
+	fmt.Println("Pokémon in pokedex:")
+	for key := range g.pokedex {
+		fmt.Println("- '" + key + "'")
+	}
+
+	pokemon, found := g.pokedex[a]
+	if !found {
+		fmt.Printf("you have not caught that pokemon: %v\n", a)
+		return
+	} else {
+		fmt.Printf("Name: %v\n", pokemon.Name)
+		fmt.Printf("Height: %v\n", pokemon.Inspection.Height)
+		fmt.Printf("Weight: %v\n", pokemon.Inspection.Weight)
+
+		fmt.Println("Stats:")
+
+		for _, stat := range pokemon.Inspection.Stats {
+			fmt.Printf(" -%v: %v\n", stat.Stat.Name, stat.BaseStat)
+		}
+		fmt.Println("Types:")
+		for _, stat := range pokemon.Inspection.Types {
+			fmt.Printf(" -%v\n", stat.Type.Name)
+		}
+	}
+
+}
+
+func (g *game) commandPokedex() {
+	for key := range g.pokedex {
+		fmt.Println("- '" + key + "'")
+	}
 }
 
 func cleanInput(text string) []string {
